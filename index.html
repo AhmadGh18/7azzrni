@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#6d28d9" />
+  <title>Who's the Impostor? — Party Game</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app">
+
+    <!-- HOME -->
+    <section class="screen active" id="screen-home">
+      <div class="bg-blobs"><span></span><span></span><span></span></div>
+      <div class="home">
+        <div class="logo-wrap">
+          <div class="logo">🕵️</div>
+          <div class="logo-ring"></div>
+        </div>
+        <h1 class="title">Who's the <span class="accent">Impostor?</span></h1>
+        <p class="subtitle">Pass the phone. Keep the secret. Find the spy.</p>
+        <div class="home-buttons">
+          <button class="btn btn-primary btn-lg" data-go="setup">
+            <span>▶</span> Start Game
+          </button>
+          <button class="btn btn-ghost" data-go="howto">How to Play</button>
+        </div>
+        <p class="footer-hint">🎉 Best played with 3+ players</p>
+      </div>
+    </section>
+
+    <!-- HOW TO PLAY -->
+    <section class="screen" id="screen-howto">
+      <header class="topbar">
+        <button class="icon-btn" data-go="home">←</button>
+        <h2>How to Play</h2>
+        <span class="spacer"></span>
+      </header>
+      <div class="content">
+        <div class="card">
+          <div class="step"><span class="step-num">1</span><div><h3>Choose a category</h3><p>Animals, food, countries and much more.</p></div></div>
+          <div class="step"><span class="step-num">2</span><div><h3>Add player names</h3><p>Everyone who's playing on this phone.</p></div></div>
+          <div class="step"><span class="step-num">3</span><div><h3>Pass the phone</h3><p>Each player secretly sees the word — except the impostor, who only gets a tiny hint.</p></div></div>
+          <div class="step"><span class="step-num">4</span><div><h3>Ask questions</h3><p>Take turns asking each other about the word without saying it out loud.</p></div></div>
+          <div class="step"><span class="step-num">5</span><div><h3>Vote & reveal</h3><p>Who's the impostor? Vote and find out!</p></div></div>
+        </div>
+        <button class="btn btn-primary btn-lg full" data-go="setup">Got it — Let's Play</button>
+      </div>
+    </section>
+
+    <!-- SETUP -->
+    <section class="screen" id="screen-setup">
+      <header class="topbar">
+        <button class="icon-btn" data-go="home">←</button>
+        <h2>Game Setup</h2>
+        <span class="spacer"></span>
+      </header>
+      <div class="content">
+        <label class="section-label">Choose a category</label>
+        <div class="category-grid" id="category-grid"></div>
+
+        <label class="section-label">Number of players</label>
+        <div class="stepper">
+          <button class="stepper-btn" id="players-minus">−</button>
+          <div class="stepper-value" id="players-value">4</div>
+          <button class="stepper-btn" id="players-plus">+</button>
+        </div>
+
+        <label class="section-label">Number of impostors</label>
+        <div class="stepper">
+          <button class="stepper-btn" id="impostors-minus">−</button>
+          <div class="stepper-value" id="impostors-value">1</div>
+          <button class="stepper-btn" id="impostors-plus">+</button>
+        </div>
+
+        <label class="section-label">Impostor difficulty</label>
+        <div class="segment" id="difficulty-seg">
+          <button class="seg-btn active" data-diff="medium">Easy<br><small>Tiny hint</small></button>
+          <button class="seg-btn" data-diff="hard">Hard<br><small>No hint</small></button>
+        </div>
+
+        <button class="btn btn-primary btn-lg full" id="to-names">Next: Player Names</button>
+      </div>
+    </section>
+
+    <!-- NAMES -->
+    <section class="screen" id="screen-names">
+      <header class="topbar">
+        <button class="icon-btn" data-go="setup">←</button>
+        <h2>Player Names</h2>
+        <span class="spacer"></span>
+      </header>
+      <div class="content">
+        <p class="hint-text">Type each player's name. Tap the shuffle to randomize impostor pick.</p>
+        <div class="names-list" id="names-list"></div>
+        <button class="btn btn-primary btn-lg full" id="start-game">🎬 Start Round</button>
+      </div>
+    </section>
+
+    <!-- PASS PHONE -->
+    <section class="screen" id="screen-pass">
+      <div class="pass-wrap">
+        <div class="phone-icon">📱</div>
+        <p class="pass-label">Give phone to</p>
+        <h1 class="pass-name" id="pass-name">—</h1>
+        <p class="pass-counter" id="pass-counter">Player 1 of 4</p>
+        <button class="btn btn-primary btn-lg" id="reveal-btn">👁️ Reveal What I Am</button>
+        <p class="warn-text">Make sure nobody else is looking!</p>
+      </div>
+    </section>
+
+    <!-- REVEAL -->
+    <section class="screen" id="screen-reveal">
+      <div class="reveal-wrap">
+        <div class="reveal-card" id="reveal-card">
+          <div class="reveal-role" id="reveal-role">Your word</div>
+          <div class="reveal-word" id="reveal-word">—</div>
+          <div class="reveal-hint" id="reveal-hint"></div>
+        </div>
+        <p class="warn-text">Remember it. Then hide the screen.</p>
+        <button class="btn btn-primary btn-lg" id="reveal-next">Got it — Next Player</button>
+      </div>
+    </section>
+
+    <!-- DISCUSSION -->
+    <section class="screen" id="screen-discuss">
+      <header class="topbar">
+        <button class="icon-btn" id="back-to-home">←</button>
+        <h2>Discussion Time</h2>
+        <span class="spacer"></span>
+      </header>
+      <div class="content center">
+        <div class="timer-ring">
+          <svg viewBox="0 0 120 120">
+            <circle class="timer-track" cx="60" cy="60" r="52"></circle>
+            <circle class="timer-fill" id="timer-fill" cx="60" cy="60" r="52"></circle>
+          </svg>
+          <div class="timer-text" id="timer-text">01:30</div>
+        </div>
+        <div class="timer-buttons">
+          <button class="btn btn-ghost" id="timer-toggle">Pause</button>
+          <button class="btn btn-ghost" id="timer-reset">Reset</button>
+        </div>
+        <p class="hint-text center">Everyone takes turns asking short questions about the word. Don't say it out loud!</p>
+        <button class="btn btn-primary btn-lg full" id="to-vote">🗳️ Time to Vote</button>
+      </div>
+    </section>
+
+    <!-- VOTE -->
+    <section class="screen" id="screen-vote">
+      <header class="topbar">
+        <button class="icon-btn" data-go="discuss">←</button>
+        <h2>Who's the Impostor?</h2>
+        <span class="spacer"></span>
+      </header>
+      <div class="content">
+        <p class="hint-text">Tap the player you think is the impostor.</p>
+        <div class="vote-grid" id="vote-grid"></div>
+        <button class="btn btn-ghost full" id="skip-vote">Skip — Just Reveal</button>
+      </div>
+    </section>
+
+    <!-- RESULT -->
+    <section class="screen" id="screen-result">
+      <div class="result-wrap">
+        <div class="confetti" id="confetti"></div>
+        <div class="result-emoji" id="result-emoji">🎉</div>
+        <h1 class="result-title" id="result-title">Reveal!</h1>
+        <p class="result-sub" id="result-sub">Here's who was who…</p>
+        <div class="result-word-card">
+          <div class="rwc-label">The secret word was</div>
+          <div class="rwc-word" id="result-word">—</div>
+        </div>
+        <div class="result-list" id="result-list"></div>
+        <div class="result-buttons">
+          <button class="btn btn-primary btn-lg full" id="play-again">🔁 Play Again</button>
+          <button class="btn btn-ghost full" data-go="home">🏠 Home</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script src="words.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
