@@ -435,17 +435,7 @@ function renderLobbyPlayers() {
   if (net.role === "host") updateLobbyImpUI();
 }
 
-// Copy room code (stays on the page — no risk of the tab getting suspended)
-document.getElementById("copy-code-btn").addEventListener("click", (e) => {
-  e.stopPropagation();
-  if (!net.roomCode) return;
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(net.roomCode).catch(() => {});
-  }
-  flashStatus("Copied!");
-});
-
-// Native share sheet — opens as an overlay, doesn't background the tab as aggressively
+// One button: native share sheet on mobile, clipboard fallback on desktop
 document.getElementById("share-code-btn").addEventListener("click", async (e) => {
   e.stopPropagation();
   if (!net.roomCode) return;
@@ -453,14 +443,13 @@ document.getElementById("share-code-btn").addEventListener("click", async (e) =>
   if (navigator.share) {
     try {
       await navigator.share({ title: "Impostor Game", text: shareText });
-    } catch (err) { /* user cancelled */ }
-  } else {
-    // Fallback: copy full message
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(shareText).catch(() => {});
-    }
-    flashStatus("Copied — paste to share");
+      return;
+    } catch (err) { /* user cancelled — fall through to copy */ }
   }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(shareText).catch(() => {});
+  }
+  flashStatus("Copied to clipboard!");
 });
 
 function flashStatus(text) {
