@@ -269,9 +269,13 @@
       </header>
       <div class="content">
         <div class="room-code-card">
-          <div class="rcc-label">Room code — tap to copy</div>
+          <div class="rcc-label">Room code</div>
           <div class="rcc-code" id="lobby-code">----</div>
           <div class="rcc-hint" id="lobby-status">Waiting for players…</div>
+          <div class="rcc-actions">
+            <button class="btn btn-ghost rcc-btn" id="copy-code-btn">📋 Copy</button>
+            <button class="btn btn-primary rcc-btn" id="share-code-btn">📤 Share</button>
+          </div>
         </div>
 
         <label class="section-label">Players (<span id="lobby-count">0</span>/<span id="lobby-max">5</span>)</label>

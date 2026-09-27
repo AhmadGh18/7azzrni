@@ -748,6 +748,17 @@ input { font-family: inherit; }
   font-size: 13px;
   color: rgba(255,255,255,0.55);
 }
+.rcc-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.rcc-btn {
+  flex: 1;
+  padding: 10px;
+  font-size: 14px;
+  border-radius: 12px;
+}
 
 /* LOBBY PLAYERS */
 .lobby-players {

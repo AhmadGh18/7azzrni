@@ -190,10 +190,26 @@ function attemptCreatePeer(retry = 0) {
     console.warn("peer error", err);
     if (err.type === "unavailable-id" && retry < 5) {
       attemptCreatePeer(retry + 1);
+    } else if (err.type === "network" || err.type === "server-error" || err.type === "socket-error") {
+      // Transient — try to reconnect
+      try { net.peer.reconnect(); } catch (e) {}
     } else {
       alert("Couldn't create room: " + err.type + ". Try again.");
     }
   });
+
+  net.peer.on("disconnected", () => {
+    // Signaling connection lost (mobile backgrounded the tab, WiFi flicker, etc.)
+    // The peer ID is still reserved on the server for a short window — reconnect uses it.
+    console.log("Peer disconnected. Reconnecting…");
+    try { net.peer.reconnect(); } catch (e) {}
+    updateLobbyStatus("Reconnecting…");
+  });
+}
+
+function updateLobbyStatus(text) {
+  const el = document.getElementById("lobby-status");
+  if (el && net.role) el.textContent = text;
 }
 
 function setupHostConnection(conn) {
@@ -315,8 +331,33 @@ document.getElementById("join-room-btn").addEventListener("click", () => {
   net.peer.on("error", (err) => {
     console.warn("peer err", err);
     if (err.type === "peer-unavailable") showErr("join-error", "Room not found");
-    else showErr("join-error", "Connection error");
+    else if (err.type === "network" || err.type === "socket-error") {
+      try { net.peer.reconnect(); } catch (e) {}
+    } else showErr("join-error", "Connection error");
   });
+
+  net.peer.on("disconnected", () => {
+    console.log("Guest peer disconnected. Reconnecting…");
+    try { net.peer.reconnect(); } catch (e) {}
+    updateLobbyStatus("Reconnecting…");
+  });
+});
+
+// When the user comes back from the app switcher / another tab, force a reconnect
+// if PeerJS quietly lost its signaling connection while backgrounded.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  if (!net.peer) return;
+  if (net.peer.disconnected && !net.peer.destroyed) {
+    try { net.peer.reconnect(); } catch (e) {}
+    updateLobbyStatus("Reconnecting…");
+    // Optimistically restore the normal status after reconnect completes
+    setTimeout(() => {
+      if (net.peer && !net.peer.disconnected && net.phase === "lobby") {
+        updateLobbyStatus(net.role === "host" ? "Waiting for players…" : "Connected");
+      }
+    }, 2500);
+  }
 });
 
 function handleGuestMessage(msg) {
@@ -394,17 +435,40 @@ function renderLobbyPlayers() {
   if (net.role === "host") updateLobbyImpUI();
 }
 
-// Copy room code
-document.querySelector("#screen-lobby .room-code-card").addEventListener("click", () => {
+// Copy room code (stays on the page — no risk of the tab getting suspended)
+document.getElementById("copy-code-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
   if (!net.roomCode) return;
-  const t = navigator.clipboard && navigator.clipboard.writeText
-    ? navigator.clipboard.writeText(net.roomCode).catch(() => {})
-    : null;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(net.roomCode).catch(() => {});
+  }
+  flashStatus("Copied!");
+});
+
+// Native share sheet — opens as an overlay, doesn't background the tab as aggressively
+document.getElementById("share-code-btn").addEventListener("click", async (e) => {
+  e.stopPropagation();
+  if (!net.roomCode) return;
+  const shareText = `Join my Impostor game! Room code: ${net.roomCode}\n${location.href}`;
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: "Impostor Game", text: shareText });
+    } catch (err) { /* user cancelled */ }
+  } else {
+    // Fallback: copy full message
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(shareText).catch(() => {});
+    }
+    flashStatus("Copied — paste to share");
+  }
+});
+
+function flashStatus(text) {
   const hint = document.getElementById("lobby-status");
   const prev = hint.textContent;
-  hint.textContent = "Copied!";
-  setTimeout(() => { hint.textContent = prev; }, 1200);
-});
+  hint.textContent = text;
+  setTimeout(() => { hint.textContent = prev; }, 1400);
+}
 
 // Leave lobby
 document.getElementById("lobby-leave").addEventListener("click", () => {
