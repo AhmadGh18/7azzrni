@@ -25,7 +25,10 @@
         <p class="subtitle">Pass the phone. Keep the secret. Find the spy.</p>
         <div class="home-buttons">
           <button class="btn btn-primary btn-lg" data-go="setup">
-            <span>▶</span> Start Game
+            <span>📱</span> Play Local
+          </button>
+          <button class="btn btn-primary btn-lg" data-go="online-menu">
+            <span>🌐</span> Play Online
           </button>
           <button class="btn btn-ghost" data-go="howto">How to Play</button>
         </div>
@@ -183,9 +186,183 @@
       </div>
     </section>
 
+    <!-- ================= ONLINE SCREENS ================= -->
+
+    <!-- ONLINE MENU -->
+    <section class="screen" id="screen-online-menu">
+      <header class="topbar">
+        <button class="icon-btn" data-go="home">←</button>
+        <h2>Play Online</h2>
+        <span class="spacer"></span>
+      </header>
+      <div class="content center">
+        <div class="online-hero">🌐</div>
+        <p class="hint-text center">Play with friends on their own phones. One person creates a room, others join with a code.</p>
+        <button class="btn btn-primary btn-lg full" data-go="online-create">🎮 Create Room</button>
+        <button class="btn btn-ghost full" data-go="online-join">🔑 Join Room</button>
+      </div>
+    </section>
+
+    <!-- CREATE ROOM -->
+    <section class="screen" id="screen-online-create">
+      <header class="topbar">
+        <button class="icon-btn" data-go="online-menu">←</button>
+        <h2>Create Room</h2>
+        <span class="spacer"></span>
+      </header>
+      <div class="content">
+        <label class="section-label">Your name</label>
+        <div class="name-row">
+          <div class="name-num">👤</div>
+          <input type="text" class="name-input" id="host-name" placeholder="Your name" maxlength="20" />
+        </div>
+
+        <label class="section-label">Max players</label>
+        <div class="stepper">
+          <button class="stepper-btn" id="max-minus">−</button>
+          <div class="stepper-value" id="max-value">5</div>
+          <button class="stepper-btn" id="max-plus">+</button>
+        </div>
+
+        <button class="btn btn-primary btn-lg full" id="create-room-btn">🚪 Create Room</button>
+      </div>
+    </section>
+
+    <!-- JOIN ROOM -->
+    <section class="screen" id="screen-online-join">
+      <header class="topbar">
+        <button class="icon-btn" data-go="online-menu">←</button>
+        <h2>Join Room</h2>
+        <span class="spacer"></span>
+      </header>
+      <div class="content">
+        <label class="section-label">Your name</label>
+        <div class="name-row">
+          <div class="name-num">👤</div>
+          <input type="text" class="name-input" id="guest-name" placeholder="Your name" maxlength="20" />
+        </div>
+
+        <label class="section-label">Room code</label>
+        <div class="name-row">
+          <div class="name-num">🔑</div>
+          <input type="text" class="name-input code-input" id="guest-code" placeholder="ABCD" maxlength="4" autocapitalize="characters" />
+        </div>
+
+        <button class="btn btn-primary btn-lg full" id="join-room-btn">🚪 Join Room</button>
+        <p class="err-text" id="join-error"></p>
+      </div>
+    </section>
+
+    <!-- LOBBY -->
+    <section class="screen" id="screen-lobby">
+      <header class="topbar">
+        <button class="icon-btn" id="lobby-leave">←</button>
+        <h2>Lobby</h2>
+        <span class="spacer"></span>
+      </header>
+      <div class="content">
+        <div class="room-code-card">
+          <div class="rcc-label">Room code — tap to copy</div>
+          <div class="rcc-code" id="lobby-code">----</div>
+          <div class="rcc-hint" id="lobby-status">Waiting for players…</div>
+        </div>
+
+        <label class="section-label">Players (<span id="lobby-count">0</span>/<span id="lobby-max">5</span>)</label>
+        <div class="lobby-players" id="lobby-players"></div>
+
+        <div id="host-controls">
+          <label class="section-label">Category</label>
+          <div class="category-grid" id="lobby-category-grid"></div>
+
+          <label class="section-label">Number of impostors</label>
+          <div class="stepper">
+            <button class="stepper-btn" id="lobby-imp-minus">−</button>
+            <div class="stepper-value" id="lobby-imp-value">1</div>
+            <button class="stepper-btn" id="lobby-imp-plus">+</button>
+          </div>
+
+          <label class="section-label">Impostor difficulty</label>
+          <div class="segment" id="lobby-diff-seg">
+            <button class="seg-btn active" data-diff="medium">Easy<br><small>Tiny hint</small></button>
+            <button class="seg-btn" data-diff="hard">Hard<br><small>No hint</small></button>
+          </div>
+
+          <button class="btn btn-primary btn-lg full" id="host-start-btn">🎬 Start Game</button>
+        </div>
+
+        <div id="guest-waiting" style="display:none">
+          <p class="hint-text center">Waiting for the host to start the game…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ONLINE REVEAL -->
+    <section class="screen" id="screen-online-reveal">
+      <div class="reveal-wrap">
+        <div class="reveal-card" id="online-reveal-card">
+          <div class="reveal-role" id="online-reveal-role">Your word</div>
+          <div class="reveal-word" id="online-reveal-word">—</div>
+          <div class="reveal-hint" id="online-reveal-hint"></div>
+        </div>
+        <p class="warn-text">Remember it! Don't say the word out loud.</p>
+        <button class="btn btn-primary btn-lg" id="online-reveal-continue">Got it — Continue</button>
+      </div>
+    </section>
+
+    <!-- ONLINE DISCUSSION + CHAT -->
+    <section class="screen" id="screen-online-chat">
+      <header class="topbar">
+        <button class="icon-btn" id="chat-leave">←</button>
+        <div class="chat-topbar-info">
+          <h2>Discussion</h2>
+          <span class="chat-timer" id="chat-timer">2:00</span>
+        </div>
+        <span class="spacer"></span>
+      </header>
+      <div class="chat-body" id="chat-messages"></div>
+      <div class="chat-input-row">
+        <input type="text" class="chat-input" id="chat-input" placeholder="Ask a question…" maxlength="200" />
+        <button class="chat-send" id="chat-send">➤</button>
+      </div>
+    </section>
+
+    <!-- ONLINE VOTE -->
+    <section class="screen" id="screen-online-vote">
+      <header class="topbar">
+        <span class="spacer"></span>
+        <h2>Vote the Impostor</h2>
+        <span class="spacer"></span>
+      </header>
+      <div class="content">
+        <p class="hint-text center">Time's up! Tap who you think is the impostor. <span id="vote-progress">(0/0 voted)</span></p>
+        <div class="vote-grid" id="online-vote-grid"></div>
+      </div>
+    </section>
+
+    <!-- ONLINE RESULT -->
+    <section class="screen" id="screen-online-result">
+      <div class="result-wrap">
+        <div class="confetti" id="online-confetti"></div>
+        <div class="result-emoji" id="online-result-emoji">🎉</div>
+        <h1 class="result-title" id="online-result-title">Reveal!</h1>
+        <p class="result-sub" id="online-result-sub">Here's who was who…</p>
+        <div class="result-word-card">
+          <div class="rwc-label">The secret word was</div>
+          <div class="rwc-word" id="online-result-word">—</div>
+        </div>
+        <div class="result-list" id="online-result-list"></div>
+        <div class="result-buttons">
+          <button class="btn btn-primary btn-lg full" id="online-play-again">🔁 Play Again</button>
+          <button class="btn btn-ghost full" id="online-leave">🏠 Leave Room</button>
+        </div>
+      </div>
+    </section>
+
   </div>
 
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="words.js"></script>
   <script src="script.js"></script>
+  <script src="online.js"></script>
 </body>
 </html>

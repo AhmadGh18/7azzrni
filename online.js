@@ -1,0 +1,776 @@
+// ============================================================
+// Online multiplayer — PeerJS, host-authoritative
+// ============================================================
+//
+// Roles:
+//   HOST: creates the room, its peer id IS the room code.
+//         Runs the game (picks word, assigns roles, runs timer, tallies votes).
+//         Host is also a regular player.
+//   GUEST: connects to host's peer id.
+//
+// Message protocol (JSON over PeerJS DataConnection):
+//   { t: "join",     name }                          guest -> host
+//   { t: "roster",   players: [{id, name, isHost}] } host -> all
+//   { t: "start",    catId, impostorCount, difficulty, timerSecs }  host -> all (informational)
+//   { t: "role",     isImpostor, word?, hint? }      host -> each guest privately
+//   { t: "chat",     fromId, name, text }            anyone -> host -> all
+//   { t: "phase",    phase: "chat"|"vote"|"result",
+//                    timerLeft? }                    host -> all
+//   { t: "vote",     votedId }                       guest -> host
+//   { t: "votes",    tally: {id: count},
+//                    votedCount, totalCount }        host -> all
+//   { t: "result",   impostorIds, word, winner, votedOutId } host -> all
+//   { t: "kick",     reason }                        host -> guest
+// ============================================================
+
+const net = {
+  role: null,           // "host" | "guest"
+  peer: null,           // PeerJS Peer instance
+  hostConn: null,       // guest side: connection to host
+  guestConns: {},       // host side: {peerId: DataConnection}
+  myId: null,
+  myName: "",
+  maxPlayers: 5,
+
+  // Shared state
+  roomCode: null,
+  players: [],          // [{id, name, isHost}]
+  category: "random",
+  impostorCount: 1,
+  difficulty: "medium",
+  timerSecs: 120,
+
+  // Round state (host authoritative)
+  roundCategory: null,  // resolved category object
+  roundWord: null,      // {word, hint}
+  impostorIds: [],
+  myRole: null,         // {isImpostor, word?, hint?}
+  votes: {},            // {voterId: votedId}
+  phase: "lobby",       // lobby | reveal | chat | vote | result
+  timerInterval: null,
+  timerLeft: 0,
+
+  // UI state
+  lobbyCategoryId: "random"
+};
+
+// ============================================================
+// UTILITIES
+// ============================================================
+function genRoomCode() {
+  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // no I/O to avoid confusion
+  let code = "";
+  for (let i = 0; i < 4; i++) code += letters[Math.floor(Math.random() * letters.length)];
+  return code;
+}
+
+function peerIdFor(code) { return "impostor-" + code.toUpperCase(); }
+function codeFromPeerId(pid) { return (pid || "").replace(/^impostor-/, ""); }
+
+function send(conn, msg) {
+  try { conn.send(msg); } catch (e) { console.warn("send failed", e); }
+}
+function broadcast(msg) {
+  Object.values(net.guestConns).forEach(c => { if (c && c.open) send(c, msg); });
+}
+function sendToHost(msg) {
+  if (net.hostConn && net.hostConn.open) send(net.hostConn, msg);
+}
+
+function showErr(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text || "";
+}
+
+// ============================================================
+// STEPPER (max players + impostor count)
+// ============================================================
+document.getElementById("max-minus").addEventListener("click", () => {
+  if (net.maxPlayers > 3) { net.maxPlayers--; updateMaxUI(); }
+});
+document.getElementById("max-plus").addEventListener("click", () => {
+  if (net.maxPlayers < 10) { net.maxPlayers++; updateMaxUI(); }
+});
+function updateMaxUI() {
+  document.getElementById("max-value").textContent = net.maxPlayers;
+  document.getElementById("max-minus").disabled = net.maxPlayers <= 3;
+  document.getElementById("max-plus").disabled = net.maxPlayers >= 10;
+}
+updateMaxUI();
+
+document.getElementById("lobby-imp-minus").addEventListener("click", () => {
+  if (net.impostorCount > 1) { net.impostorCount--; updateLobbyImpUI(); pushLobbyStateFromHost(); }
+});
+document.getElementById("lobby-imp-plus").addEventListener("click", () => {
+  const maxImp = Math.max(1, net.players.length - 2);
+  if (net.impostorCount < maxImp) { net.impostorCount++; updateLobbyImpUI(); pushLobbyStateFromHost(); }
+});
+function updateLobbyImpUI() {
+  document.getElementById("lobby-imp-value").textContent = net.impostorCount;
+  const maxImp = Math.max(1, net.players.length - 2);
+  document.getElementById("lobby-imp-minus").disabled = net.impostorCount <= 1;
+  document.getElementById("lobby-imp-plus").disabled = net.impostorCount >= maxImp;
+  if (net.impostorCount > maxImp) { net.impostorCount = maxImp; document.getElementById("lobby-imp-value").textContent = net.impostorCount; }
+}
+
+document.querySelectorAll("#lobby-diff-seg .seg-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#lobby-diff-seg .seg-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    net.difficulty = btn.getAttribute("data-diff");
+  });
+});
+
+function pushLobbyStateFromHost() { /* future: sync settings; not required for MVP */ }
+
+// ============================================================
+// CATEGORY GRID IN LOBBY (host chooses)
+// ============================================================
+function renderLobbyCategoryGrid() {
+  const grid = document.getElementById("lobby-category-grid");
+  grid.innerHTML = "";
+  const randomBtn = document.createElement("button");
+  randomBtn.className = "cat-card cat-random" + (net.lobbyCategoryId === "random" ? " selected" : "");
+  randomBtn.innerHTML = `<span class="cat-emoji">🎲</span><span class="cat-name">Random</span>`;
+  randomBtn.addEventListener("click", () => { net.lobbyCategoryId = "random"; renderLobbyCategoryGrid(); });
+  grid.appendChild(randomBtn);
+  CATEGORIES.forEach(c => {
+    const btn = document.createElement("button");
+    btn.className = "cat-card" + (net.lobbyCategoryId === c.id ? " selected" : "");
+    btn.innerHTML = `<span class="cat-emoji">${c.emoji}</span><span class="cat-name">${c.name}</span>`;
+    btn.addEventListener("click", () => { net.lobbyCategoryId = c.id; renderLobbyCategoryGrid(); });
+    grid.appendChild(btn);
+  });
+}
+
+// ============================================================
+// CREATE ROOM (HOST)
+// ============================================================
+document.getElementById("create-room-btn").addEventListener("click", () => {
+  const name = document.getElementById("host-name").value.trim() || "Host";
+  net.myName = name;
+  net.role = "host";
+  attemptCreatePeer();
+});
+
+function attemptCreatePeer(retry = 0) {
+  const code = genRoomCode();
+  const pid = peerIdFor(code);
+  if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
+  net.peer = new Peer(pid, { debug: 1 });
+
+  net.peer.on("open", (id) => {
+    net.myId = id;
+    net.roomCode = code;
+    net.players = [{ id, name: net.myName, isHost: true }];
+    goLobby();
+  });
+
+  net.peer.on("connection", (conn) => {
+    setupHostConnection(conn);
+  });
+
+  net.peer.on("error", (err) => {
+    console.warn("peer error", err);
+    if (err.type === "unavailable-id" && retry < 5) {
+      attemptCreatePeer(retry + 1);
+    } else {
+      alert("Couldn't create room: " + err.type + ". Try again.");
+    }
+  });
+}
+
+function setupHostConnection(conn) {
+  conn.on("open", () => {
+    // wait for join message with name before adding player
+  });
+  conn.on("data", (msg) => handleHostMessage(conn, msg));
+  conn.on("close", () => {
+    if (conn._joinedPlayerId) {
+      net.players = net.players.filter(p => p.id !== conn._joinedPlayerId);
+      delete net.guestConns[conn._joinedPlayerId];
+      broadcastRoster();
+      renderLobbyPlayers();
+      addSystemMessage(conn._joinedName + " left");
+    }
+  });
+}
+
+function handleHostMessage(conn, msg) {
+  if (!msg || !msg.t) return;
+  switch (msg.t) {
+    case "join": {
+      // Enforce max players
+      if (net.players.length >= net.maxPlayers) {
+        send(conn, { t: "kick", reason: "Room is full" });
+        setTimeout(() => { try { conn.close(); } catch (e) {} }, 200);
+        return;
+      }
+      if (net.phase !== "lobby") {
+        send(conn, { t: "kick", reason: "Game already started" });
+        setTimeout(() => { try { conn.close(); } catch (e) {} }, 200);
+        return;
+      }
+      const id = conn.peer;
+      const name = (msg.name || "Player").slice(0, 20);
+      conn._joinedPlayerId = id;
+      conn._joinedName = name;
+      net.guestConns[id] = conn;
+      net.players.push({ id, name, isHost: false });
+      broadcastRoster();
+      renderLobbyPlayers();
+      addSystemMessage(name + " joined");
+      break;
+    }
+    case "chat": {
+      const p = net.players.find(x => x.id === msg.fromId);
+      if (!p) return;
+      const chatMsg = { t: "chat", fromId: p.id, name: p.name, text: msg.text.slice(0, 200) };
+      broadcast(chatMsg);
+      addChatMessage(chatMsg);
+      break;
+    }
+    case "vote": {
+      net.votes[conn._joinedPlayerId] = msg.votedId;
+      broadcastVotes();
+      maybeFinishVote();
+      break;
+    }
+  }
+}
+
+function broadcastRoster() {
+  const roster = { t: "roster", players: net.players, max: net.maxPlayers };
+  broadcast(roster);
+}
+
+// ============================================================
+// JOIN ROOM (GUEST)
+// ============================================================
+document.getElementById("join-room-btn").addEventListener("click", () => {
+  const name = document.getElementById("guest-name").value.trim() || "Player";
+  const codeRaw = document.getElementById("guest-code").value.trim().toUpperCase();
+  if (!/^[A-Z]{4}$/.test(codeRaw)) {
+    showErr("join-error", "Enter a 4-letter code (A–Z)");
+    return;
+  }
+  showErr("join-error", "Connecting…");
+  net.myName = name;
+  net.role = "guest";
+  net.roomCode = codeRaw;
+
+  if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
+  net.peer = new Peer({ debug: 1 });
+
+  net.peer.on("open", (id) => {
+    net.myId = id;
+    const conn = net.peer.connect(peerIdFor(codeRaw), { reliable: true });
+    net.hostConn = conn;
+    let opened = false;
+
+    conn.on("open", () => {
+      opened = true;
+      send(conn, { t: "join", name });
+      showErr("join-error", "");
+      goLobby();
+    });
+    conn.on("data", (msg) => handleGuestMessage(msg));
+    conn.on("close", () => {
+      if (!opened) {
+        showErr("join-error", "Room not found");
+      } else {
+        alert("Disconnected from host.");
+        leaveRoom();
+      }
+    });
+    conn.on("error", (err) => {
+      console.warn("conn err", err);
+      showErr("join-error", "Couldn't connect");
+    });
+
+    setTimeout(() => {
+      if (!opened) {
+        showErr("join-error", "Room not found");
+        try { conn.close(); } catch (e) {}
+      }
+    }, 8000);
+  });
+
+  net.peer.on("error", (err) => {
+    console.warn("peer err", err);
+    if (err.type === "peer-unavailable") showErr("join-error", "Room not found");
+    else showErr("join-error", "Connection error");
+  });
+});
+
+function handleGuestMessage(msg) {
+  if (!msg || !msg.t) return;
+  switch (msg.t) {
+    case "roster":
+      net.players = msg.players;
+      net.maxPlayers = msg.max;
+      renderLobbyPlayers();
+      break;
+    case "start":
+      // informational — hide lobby ui, wait for role
+      break;
+    case "role":
+      net.myRole = { isImpostor: msg.isImpostor, word: msg.word, hint: msg.hint };
+      showOnlineReveal();
+      break;
+    case "phase":
+      handlePhaseChange(msg);
+      break;
+    case "chat":
+      if (msg.fromId !== net.myId) addChatMessage(msg);
+      break;
+    case "votes":
+      updateVoteTally(msg);
+      break;
+    case "result":
+      showOnlineResult(msg);
+      break;
+    case "kick":
+      alert(msg.reason || "Removed from room");
+      leaveRoom();
+      break;
+  }
+}
+
+// ============================================================
+// LOBBY UI
+// ============================================================
+function goLobby() {
+  showScreen("lobby");
+  net.phase = "lobby";
+  document.getElementById("lobby-code").textContent = net.roomCode;
+  document.getElementById("lobby-max").textContent = net.maxPlayers;
+  const isHost = net.role === "host";
+  document.getElementById("host-controls").style.display = isHost ? "" : "none";
+  document.getElementById("guest-waiting").style.display = isHost ? "none" : "";
+  if (isHost) {
+    renderLobbyCategoryGrid();
+    updateLobbyImpUI();
+  }
+  renderLobbyPlayers();
+}
+
+function renderLobbyPlayers() {
+  const list = document.getElementById("lobby-players");
+  list.innerHTML = "";
+  net.players.forEach((p, i) => {
+    const row = document.createElement("div");
+    row.className = "lobby-player";
+    const emoji = emojiForIndex(i);
+    row.innerHTML = `
+      <span class="lp-emoji">${emoji}</span>
+      <span class="lp-name">${escapeHtml(p.name)}${p.id === net.myId ? " (you)" : ""}</span>
+      ${p.isHost ? '<span class="lp-badge">Host</span>' : ''}
+    `;
+    list.appendChild(row);
+  });
+  document.getElementById("lobby-count").textContent = net.players.length;
+  document.getElementById("lobby-max").textContent = net.maxPlayers;
+  if (net.role === "host") updateLobbyImpUI();
+}
+
+// Copy room code
+document.querySelector("#screen-lobby .room-code-card").addEventListener("click", () => {
+  if (!net.roomCode) return;
+  const t = navigator.clipboard && navigator.clipboard.writeText
+    ? navigator.clipboard.writeText(net.roomCode).catch(() => {})
+    : null;
+  const hint = document.getElementById("lobby-status");
+  const prev = hint.textContent;
+  hint.textContent = "Copied!";
+  setTimeout(() => { hint.textContent = prev; }, 1200);
+});
+
+// Leave lobby
+document.getElementById("lobby-leave").addEventListener("click", () => {
+  if (confirm("Leave the room?")) leaveRoom();
+});
+
+function leaveRoom() {
+  if (net.timerInterval) { clearInterval(net.timerInterval); net.timerInterval = null; }
+  try { if (net.peer) net.peer.destroy(); } catch (e) {}
+  net.peer = null;
+  net.hostConn = null;
+  net.guestConns = {};
+  net.players = [];
+  net.roomCode = null;
+  net.myRole = null;
+  net.votes = {};
+  net.phase = "lobby";
+  showScreen("home");
+}
+
+// ============================================================
+// HOST START GAME
+// ============================================================
+document.getElementById("host-start-btn").addEventListener("click", () => {
+  if (net.role !== "host") return;
+  if (net.players.length < 3) {
+    alert("Need at least 3 players to start.");
+    return;
+  }
+  hostStartGame();
+});
+
+function hostStartGame() {
+  net.phase = "reveal";
+  net.votes = {};
+
+  // Pick category
+  const catId = net.lobbyCategoryId;
+  const cat = catId === "random"
+    ? CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)]
+    : (CATEGORIES.find(c => c.id === catId) || CATEGORIES[0]);
+  net.roundCategory = cat;
+
+  // Pick word
+  const w = cat.words[Math.floor(Math.random() * cat.words.length)];
+  net.roundWord = typeof w === "string"
+    ? { word: w, hint: (cat.genericHints || ["Hint"])[0] }
+    : w;
+
+  // Cap impostor count
+  const maxImp = Math.max(1, net.players.length - 2);
+  if (net.impostorCount > maxImp) net.impostorCount = maxImp;
+
+  // Pick impostors from all players (including host)
+  const indices = [...Array(net.players.length).keys()];
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  net.impostorIds = indices.slice(0, net.impostorCount).map(i => net.players[i].id);
+
+  // Send everyone their role privately
+  net.players.forEach(p => {
+    const isImp = net.impostorIds.includes(p.id);
+    const role = { t: "role", isImpostor: isImp };
+    if (!isImp) role.word = net.roundWord.word;
+    else if (net.difficulty === "medium") role.hint = net.roundWord.hint;
+
+    if (p.id === net.myId) {
+      net.myRole = { isImpostor: role.isImpostor, word: role.word, hint: role.hint };
+      showOnlineReveal();
+    } else {
+      const conn = net.guestConns[p.id];
+      if (conn) send(conn, role);
+    }
+  });
+
+  broadcast({ t: "start", catId: cat.id, impostorCount: net.impostorCount, difficulty: net.difficulty, timerSecs: net.timerSecs });
+}
+
+// ============================================================
+// ONLINE REVEAL
+// ============================================================
+function showOnlineReveal() {
+  net.phase = "reveal";
+  showScreen("online-reveal");
+  const card = document.getElementById("online-reveal-card");
+  const role = document.getElementById("online-reveal-role");
+  const word = document.getElementById("online-reveal-word");
+  const hint = document.getElementById("online-reveal-hint");
+  card.classList.toggle("impostor", !!net.myRole.isImpostor);
+  if (net.myRole.isImpostor) {
+    role.textContent = "You are the";
+    word.textContent = "IMPOSTOR 🤫";
+    hint.textContent = net.myRole.hint ? `Hint: ${net.myRole.hint}` : "";
+  } else {
+    role.textContent = "Your word is";
+    word.textContent = net.myRole.word || "—";
+    hint.textContent = "";
+  }
+}
+
+document.getElementById("online-reveal-continue").addEventListener("click", () => {
+  if (net.role === "host") {
+    // Host starts the discussion phase for everyone
+    broadcast({ t: "phase", phase: "chat", timerLeft: net.timerSecs });
+    startChatPhase(net.timerSecs);
+  } else {
+    // Guests just wait for phase message
+    showScreen("online-chat");
+    document.getElementById("chat-messages").innerHTML = "";
+    addSystemMessage("Waiting for others…");
+  }
+});
+
+// ============================================================
+// CHAT PHASE
+// ============================================================
+function handlePhaseChange(msg) {
+  if (msg.phase === "chat") {
+    startChatPhase(msg.timerLeft || net.timerSecs);
+  } else if (msg.phase === "vote") {
+    openVoteScreen();
+  }
+}
+
+function startChatPhase(seconds) {
+  net.phase = "chat";
+  net.timerLeft = seconds;
+  showScreen("online-chat");
+  document.getElementById("chat-messages").innerHTML = "";
+  addSystemMessage("Discussion started. Ask questions to find the impostor!");
+  updateChatTimer();
+  if (net.timerInterval) clearInterval(net.timerInterval);
+  net.timerInterval = setInterval(() => {
+    net.timerLeft--;
+    updateChatTimer();
+    if (net.timerLeft <= 0) {
+      clearInterval(net.timerInterval);
+      net.timerInterval = null;
+      if (net.role === "host") {
+        broadcast({ t: "phase", phase: "vote" });
+        openVoteScreen();
+      }
+    }
+  }, 1000);
+}
+
+function updateChatTimer() {
+  const m = Math.floor(net.timerLeft / 60);
+  const s = (net.timerLeft % 60).toString().padStart(2, "0");
+  const el = document.getElementById("chat-timer");
+  el.textContent = `${m}:${s}`;
+  el.classList.toggle("warn", net.timerLeft <= 30 && net.timerLeft > 10);
+  el.classList.toggle("danger", net.timerLeft <= 10);
+}
+
+document.getElementById("chat-send").addEventListener("click", sendChatFromInput);
+document.getElementById("chat-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendChatFromInput();
+});
+
+function sendChatFromInput() {
+  const input = document.getElementById("chat-input");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  const msg = { t: "chat", fromId: net.myId, name: net.myName, text: text.slice(0, 200) };
+  if (net.role === "host") {
+    broadcast(msg);
+    addChatMessage(msg);
+  } else {
+    sendToHost(msg);
+    addChatMessage(msg);
+  }
+}
+
+function addChatMessage(msg) {
+  const box = document.getElementById("chat-messages");
+  const div = document.createElement("div");
+  const mine = msg.fromId === net.myId;
+  div.className = "chat-msg " + (mine ? "mine" : "theirs");
+  div.innerHTML = `
+    ${mine ? "" : `<div class="chat-msg-name">${escapeHtml(msg.name)}</div>`}
+    <div>${escapeHtml(msg.text)}</div>
+  `;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function addSystemMessage(text) {
+  const box = document.getElementById("chat-messages");
+  if (!box) return;
+  const div = document.createElement("div");
+  div.className = "chat-msg system";
+  div.textContent = text;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+document.getElementById("chat-leave").addEventListener("click", () => {
+  if (confirm("Leave the game?")) leaveRoom();
+});
+
+// ============================================================
+// VOTE PHASE
+// ============================================================
+function openVoteScreen() {
+  net.phase = "vote";
+  showScreen("online-vote");
+  const grid = document.getElementById("online-vote-grid");
+  grid.innerHTML = "";
+  net.players.forEach((p, i) => {
+    const btn = document.createElement("button");
+    btn.className = "vote-card";
+    btn.setAttribute("data-vote-id", p.id);
+    btn.innerHTML = `
+      <span class="vote-emoji">${emojiForIndex(i)}</span>
+      ${escapeHtml(p.name)}${p.id === net.myId ? " (you)" : ""}
+      <span class="vote-count" data-count-for="${p.id}">0</span>
+    `;
+    btn.addEventListener("click", () => castVote(p.id));
+    if (p.id === net.myId) btn.disabled = true; // can't vote self
+    grid.appendChild(btn);
+  });
+  updateVoteProgressText();
+}
+
+function castVote(votedId) {
+  document.querySelectorAll(".vote-card").forEach(el => {
+    el.disabled = true;
+    el.classList.toggle("voted-by-me", el.getAttribute("data-vote-id") === votedId);
+  });
+  if (net.role === "host") {
+    net.votes[net.myId] = votedId;
+    broadcastVotes();
+    maybeFinishVote();
+  } else {
+    sendToHost({ t: "vote", votedId });
+  }
+}
+
+function broadcastVotes() {
+  const tally = {};
+  net.players.forEach(p => tally[p.id] = 0);
+  Object.values(net.votes).forEach(v => { if (tally[v] !== undefined) tally[v]++; });
+  const msg = { t: "votes", tally, votedCount: Object.keys(net.votes).length, totalCount: net.players.length };
+  broadcast(msg);
+  updateVoteTally(msg);
+}
+
+function updateVoteTally(msg) {
+  Object.entries(msg.tally).forEach(([id, count]) => {
+    const el = document.querySelector(`[data-count-for="${id}"]`);
+    if (el) el.textContent = count + " vote" + (count === 1 ? "" : "s");
+  });
+  const p = document.getElementById("vote-progress");
+  if (p) p.textContent = `(${msg.votedCount}/${msg.totalCount} voted)`;
+}
+
+function updateVoteProgressText() {
+  const total = net.players.length;
+  const voted = Object.keys(net.votes).length;
+  const p = document.getElementById("vote-progress");
+  if (p) p.textContent = `(${voted}/${total} voted)`;
+}
+
+function maybeFinishVote() {
+  if (net.role !== "host") return;
+  if (Object.keys(net.votes).length >= net.players.length) {
+    finalizeVote();
+  }
+}
+
+function finalizeVote() {
+  // Tally
+  const tally = {};
+  net.players.forEach(p => tally[p.id] = 0);
+  Object.values(net.votes).forEach(v => { if (tally[v] !== undefined) tally[v]++; });
+  let maxCount = -1, topIds = [];
+  Object.entries(tally).forEach(([id, c]) => {
+    if (c > maxCount) { maxCount = c; topIds = [id]; }
+    else if (c === maxCount) topIds.push(id);
+  });
+  const votedOutId = (maxCount > 0 && topIds.length === 1) ? topIds[0] : null;
+  const impostorCaught = votedOutId && net.impostorIds.includes(votedOutId);
+  const winner = impostorCaught ? "players" : "impostor";
+
+  const msg = {
+    t: "result",
+    impostorIds: net.impostorIds,
+    word: net.roundWord.word,
+    winner,
+    votedOutId
+  };
+  broadcast(msg);
+  showOnlineResult(msg);
+}
+
+// ============================================================
+// RESULT
+// ============================================================
+function showOnlineResult(msg) {
+  net.phase = "result";
+  showScreen("online-result");
+  const emoji = document.getElementById("online-result-emoji");
+  const title = document.getElementById("online-result-title");
+  const sub = document.getElementById("online-result-sub");
+  const wordEl = document.getElementById("online-result-word");
+  const list = document.getElementById("online-result-list");
+
+  const impostorNames = msg.impostorIds
+    .map(id => (net.players.find(p => p.id === id) || {}).name)
+    .filter(Boolean);
+  const votedOutName = msg.votedOutId
+    ? (net.players.find(p => p.id === msg.votedOutId) || {}).name
+    : null;
+
+  if (msg.winner === "players") {
+    emoji.textContent = "🎉";
+    title.textContent = "You Win!";
+    sub.textContent = `You caught ${impostorNames.join(", ")}!`;
+    launchConfettiIn("online-confetti");
+  } else {
+    emoji.textContent = "🤫";
+    title.textContent = "Impostor Wins!";
+    if (votedOutName) sub.textContent = `${votedOutName} was innocent. The impostor was ${impostorNames.join(", ")}.`;
+    else sub.textContent = `No one was voted out. The impostor was ${impostorNames.join(", ")}.`;
+  }
+  wordEl.textContent = msg.word;
+
+  list.innerHTML = "";
+  net.players.forEach((p, i) => {
+    const isImp = msg.impostorIds.includes(p.id);
+    const row = document.createElement("div");
+    row.className = "result-row" + (isImp ? " impostor" : "");
+    row.innerHTML = `
+      <span>${emojiForIndex(i)}</span>
+      <span>${escapeHtml(p.name)}${p.id === net.myId ? " (you)" : ""}</span>
+      <span class="result-badge ${isImp ? "badge-impostor" : "badge-innocent"}">${isImp ? "Impostor" : "Innocent"}</span>
+    `;
+    list.appendChild(row);
+  });
+
+  // Only host sees Play Again
+  document.getElementById("online-play-again").style.display = net.role === "host" ? "" : "none";
+}
+
+document.getElementById("online-play-again").addEventListener("click", () => {
+  if (net.role !== "host") return;
+  goLobby();
+  broadcast({ t: "roster", players: net.players, max: net.maxPlayers });
+});
+
+document.getElementById("online-leave").addEventListener("click", () => {
+  leaveRoom();
+});
+
+// ============================================================
+// HELPERS
+// ============================================================
+function launchConfettiIn(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = "";
+  const colors = ["#7c8cf5","#a5b4fc","#f0b678","#8fd3b3","#8bb6e0","#e0a3d1"];
+  for (let i = 0; i < 60; i++) {
+    const piece = document.createElement("div");
+    piece.className = "confetti-piece";
+    piece.style.left = Math.random() * 100 + "%";
+    piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+    piece.style.animationDelay = (Math.random() * 1.5) + "s";
+    piece.style.animationDuration = (2 + Math.random() * 2) + "s";
+    piece.style.transform = `rotate(${Math.random() * 360}deg)`;
+    container.appendChild(piece);
+  }
+  setTimeout(() => { container.innerHTML = ""; }, 5000);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, ch => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[ch]));
+}
+
+// Auto-uppercase code input
+document.getElementById("guest-code").addEventListener("input", (e) => {
+  e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
+});

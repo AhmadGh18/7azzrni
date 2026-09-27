@@ -46,7 +46,18 @@ document.addEventListener("click", (e) => {
 function renderCategoryGrid() {
   const grid = document.getElementById("category-grid");
   grid.innerHTML = "";
-  CATEGORIES.forEach((c, i) => {
+
+  // Random card first
+  const randomBtn = document.createElement("button");
+  randomBtn.className = "cat-card cat-random" + (state.categoryId === "random" ? " selected" : "");
+  randomBtn.innerHTML = `<span class="cat-emoji">🎲</span><span class="cat-name">Random</span>`;
+  randomBtn.addEventListener("click", () => {
+    state.categoryId = "random";
+    renderCategoryGrid();
+  });
+  grid.appendChild(randomBtn);
+
+  CATEGORIES.forEach((c) => {
     const btn = document.createElement("button");
     btn.className = "cat-card" + (state.categoryId === c.id ? " selected" : "");
     btn.innerHTML = `<span class="cat-emoji">${c.emoji}</span><span class="cat-name">${c.name}</span>`;
@@ -56,9 +67,10 @@ function renderCategoryGrid() {
     });
     grid.appendChild(btn);
   });
-  // Auto-select first category if none
-  if (!state.categoryId && CATEGORIES.length) {
-    state.categoryId = CATEGORIES[0].id;
+
+  // Default to Random if nothing selected
+  if (!state.categoryId) {
+    state.categoryId = "random";
     renderCategoryGrid();
   }
 }
@@ -148,6 +160,9 @@ document.getElementById("start-game").addEventListener("click", () => {
 // GAME LOGIC
 // ============================================================
 function pickCategory() {
+  if (state.categoryId === "random") {
+    return CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)];
+  }
   return CATEGORIES.find(c => c.id === state.categoryId) || CATEGORIES[0];
 }
 
