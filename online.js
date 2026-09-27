@@ -95,8 +95,24 @@ function updateMaxUI() {
   document.getElementById("max-value").textContent = net.maxPlayers;
   document.getElementById("max-minus").disabled = net.maxPlayers <= 3;
   document.getElementById("max-plus").disabled = net.maxPlayers >= 10;
+  updateCreateImpUI();
 }
 updateMaxUI();
+
+document.getElementById("create-imp-minus").addEventListener("click", () => {
+  if (net.impostorCount > 1) { net.impostorCount--; updateCreateImpUI(); }
+});
+document.getElementById("create-imp-plus").addEventListener("click", () => {
+  const maxImp = Math.max(1, net.maxPlayers - 2);
+  if (net.impostorCount < maxImp) { net.impostorCount++; updateCreateImpUI(); }
+});
+function updateCreateImpUI() {
+  const maxImp = Math.max(1, net.maxPlayers - 2);
+  if (net.impostorCount > maxImp) net.impostorCount = maxImp;
+  document.getElementById("create-imp-value").textContent = net.impostorCount;
+  document.getElementById("create-imp-minus").disabled = net.impostorCount <= 1;
+  document.getElementById("create-imp-plus").disabled = net.impostorCount >= maxImp;
+}
 
 document.getElementById("lobby-imp-minus").addEventListener("click", () => {
   if (net.impostorCount > 1) { net.impostorCount--; updateLobbyImpUI(); pushLobbyStateFromHost(); }
@@ -316,7 +332,11 @@ function handleGuestMessage(msg) {
       break;
     case "role":
       net.myRole = { isImpostor: msg.isImpostor, word: msg.word, hint: msg.hint };
+      resetRoundLocalState();
       showOnlineReveal();
+      break;
+    case "chat-started":
+      handleChatStarted(msg);
       break;
     case "phase":
       handlePhaseChange(msg);
@@ -420,6 +440,7 @@ document.getElementById("host-start-btn").addEventListener("click", () => {
 function hostStartGame() {
   net.phase = "reveal";
   net.votes = {};
+  resetRoundLocalState();
 
   // Pick category
   const catId = net.lobbyCategoryId;
@@ -465,6 +486,17 @@ function hostStartGame() {
   broadcast({ t: "start", catId: cat.id, impostorCount: net.impostorCount, difficulty: net.difficulty, timerSecs: net.timerSecs });
 }
 
+// Clear chat + timer state at the start of each round.
+function resetRoundLocalState() {
+  if (net.timerInterval) { clearInterval(net.timerInterval); net.timerInterval = null; }
+  net.chatPhaseRunning = false;
+  net.timerLeft = net.timerSecs;
+  const box = document.getElementById("chat-messages");
+  if (box) box.innerHTML = "";
+  hideDecisionBar();
+  updateChatTimer();
+}
+
 // ============================================================
 // ONLINE REVEAL
 // ============================================================
@@ -489,14 +521,15 @@ function showOnlineReveal() {
 
 document.getElementById("online-reveal-continue").addEventListener("click", () => {
   if (net.role === "host") {
-    // Host starts the discussion phase for everyone
-    broadcast({ t: "phase", phase: "chat", timerLeft: net.timerSecs });
-    startChatPhase(net.timerSecs);
+    // Host starts the timer for everyone (background), moves themselves to chat.
+    if (!net.chatPhaseRunning) {
+      broadcast({ t: "chat-started", timerLeft: net.timerSecs });
+      startChatTimer(net.timerSecs);
+    }
+    enterChatScreen();
   } else {
-    // Guests just wait for phase message
-    showScreen("online-chat");
-    document.getElementById("chat-messages").innerHTML = "";
-    addSystemMessage("Waiting for others…");
+    // Guest: only moves themselves into chat. Timer already running (if host clicked first).
+    enterChatScreen();
   }
 });
 
@@ -505,18 +538,29 @@ document.getElementById("online-reveal-continue").addEventListener("click", () =
 // ============================================================
 function handlePhaseChange(msg) {
   if (msg.phase === "chat") {
-    startChatPhase(msg.timerLeft || net.timerSecs);
+    startChatTimer(msg.timerLeft || net.timerSecs, !!msg.extension);
   } else if (msg.phase === "vote") {
+    // Vote is the one event that always yanks everyone forward, so nobody gets left behind
     openVoteScreen();
   }
 }
 
-function startChatPhase(seconds) {
+// Called on guests when host clicks "Got it" (starts the shared timer without switching screen).
+function handleChatStarted(msg) {
+  startChatTimer(msg.timerLeft || net.timerSecs, false);
+}
+
+// Runs the discussion timer in the background. Does NOT switch screens.
+function startChatTimer(seconds, isExtension) {
   net.phase = "chat";
+  net.chatPhaseRunning = true;
   net.timerLeft = seconds;
-  showScreen("online-chat");
-  document.getElementById("chat-messages").innerHTML = "";
-  addSystemMessage("Discussion started. Ask questions to find the impostor!");
+  if (isExtension) {
+    addSystemMessage(`⏱️ Host extended the discussion by ${seconds}s`);
+  } else {
+    addSystemMessage("Discussion started. Ask questions to find the impostor!");
+  }
+  hideDecisionBar();
   updateChatTimer();
   if (net.timerInterval) clearInterval(net.timerInterval);
   net.timerInterval = setInterval(() => {
@@ -525,13 +569,54 @@ function startChatPhase(seconds) {
     if (net.timerLeft <= 0) {
       clearInterval(net.timerInterval);
       net.timerInterval = null;
-      if (net.role === "host") {
-        broadcast({ t: "phase", phase: "vote" });
-        openVoteScreen();
+      // Only surface the decision UI if the player is currently on the chat screen
+      if (document.getElementById("screen-online-chat").classList.contains("active")) {
+        showDecisionBar();
       }
     }
   }, 1000);
 }
+
+// Move this player into the chat screen. Timer is separate.
+function enterChatScreen() {
+  showScreen("online-chat");
+  // If timer already expired while player was still on reveal, show the decision bar
+  if (net.chatPhaseRunning && net.timerLeft <= 0) {
+    showDecisionBar();
+  } else {
+    hideDecisionBar();
+  }
+  const box = document.getElementById("chat-messages");
+  box.scrollTop = box.scrollHeight;
+}
+
+function showDecisionBar() {
+  document.getElementById("chat-input-row").style.display = "none";
+  document.getElementById("chat-decision-bar").style.display = "";
+  document.getElementById("chat-decision-host").style.display = net.role === "host" ? "" : "none";
+  document.getElementById("chat-decision-guest").style.display = net.role === "host" ? "none" : "";
+  addSystemMessage(net.role === "host"
+    ? "Time's up. Continue the discussion or move to voting?"
+    : "Time's up. Waiting for the host to continue or vote…");
+}
+
+function hideDecisionBar() {
+  document.getElementById("chat-input-row").style.display = "";
+  document.getElementById("chat-decision-bar").style.display = "none";
+}
+
+document.getElementById("chat-continue-btn").addEventListener("click", () => {
+  if (net.role !== "host") return;
+  const extra = 30;
+  broadcast({ t: "phase", phase: "chat", timerLeft: extra, extension: true });
+  startChatPhase(extra, true);
+});
+
+document.getElementById("chat-vote-btn").addEventListener("click", () => {
+  if (net.role !== "host") return;
+  broadcast({ t: "phase", phase: "vote" });
+  openVoteScreen();
+});
 
 function updateChatTimer() {
   const m = Math.floor(net.timerLeft / 60);

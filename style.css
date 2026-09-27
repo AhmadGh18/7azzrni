@@ -904,6 +904,25 @@ input { font-family: inherit; }
 .chat-send:hover { background: #6b7ce8; }
 .chat-send:active { transform: scale(0.94); }
 
+.chat-decision-bar {
+  padding: 14px 16px 18px;
+  background: rgba(240, 182, 120, 0.08);
+  border-top: 1px solid rgba(240, 182, 120, 0.3);
+  animation: slideIn 0.3s ease;
+}
+.decision-title {
+  text-align: center;
+  font-weight: 600;
+  color: #f0b678;
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+.decision-buttons {
+  display: flex;
+  gap: 8px;
+}
+.decision-buttons .btn { flex: 1; padding: 12px 8px; font-size: 14px; border-radius: 12px; }
+
 /* VOTE PROGRESS */
 #vote-progress {
   display: inline-block;

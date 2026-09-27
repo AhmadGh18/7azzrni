@@ -224,6 +224,13 @@
           <button class="stepper-btn" id="max-plus">+</button>
         </div>
 
+        <label class="section-label">Number of impostors</label>
+        <div class="stepper">
+          <button class="stepper-btn" id="create-imp-minus">−</button>
+          <div class="stepper-value" id="create-imp-value">1</div>
+          <button class="stepper-btn" id="create-imp-plus">+</button>
+        </div>
+
         <button class="btn btn-primary btn-lg full" id="create-room-btn">🚪 Create Room</button>
       </div>
     </section>
@@ -320,9 +327,21 @@
         <span class="spacer"></span>
       </header>
       <div class="chat-body" id="chat-messages"></div>
-      <div class="chat-input-row">
+      <div class="chat-input-row" id="chat-input-row">
         <input type="text" class="chat-input" id="chat-input" placeholder="Ask a question…" maxlength="200" />
         <button class="chat-send" id="chat-send">➤</button>
+      </div>
+      <div class="chat-decision-bar" id="chat-decision-bar" style="display:none">
+        <div id="chat-decision-host" style="display:none">
+          <p class="decision-title">⏰ Time's up! What now?</p>
+          <div class="decision-buttons">
+            <button class="btn btn-ghost" id="chat-continue-btn">▶ Keep Playing +30s</button>
+            <button class="btn btn-primary" id="chat-vote-btn">🗳️ Vote Now</button>
+          </div>
+        </div>
+        <div id="chat-decision-guest" style="display:none">
+          <p class="decision-title">⏳ Waiting for the host to decide…</p>
+        </div>
       </div>
     </section>
 
