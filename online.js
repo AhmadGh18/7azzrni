@@ -55,6 +55,33 @@ const net = {
 };
 
 // ============================================================
+// PERSISTENCE (localStorage) — survive reloads
+// ============================================================
+const STORAGE_KEY = "impostor-online";
+
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      name: net.myName || "",
+      role: net.role,
+      roomCode: net.phase === "lobby" ? net.roomCode : null
+    }));
+  } catch (e) {}
+}
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+function clearRoomState() {
+  const s = loadState() || {};
+  s.roomCode = null;
+  s.role = null;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch (e) {}
+}
+
+// ============================================================
 // UTILITIES
 // ============================================================
 function genRoomCode() {
@@ -169,16 +196,32 @@ document.getElementById("create-room-btn").addEventListener("click", () => {
   attemptCreatePeer();
 });
 
-function attemptCreatePeer(retry = 0) {
-  const code = genRoomCode();
+function attemptCreatePeer(retry = 0, reuseCode = null) {
+  const code = reuseCode || genRoomCode();
   const pid = peerIdFor(code);
-  if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
+  const oldPeer = net.peer;
+  if (oldPeer) { try { oldPeer.destroy(); } catch (e) {} }
+  // If reusing a code just after destroying, give the signaling server a moment
+  // to release the old ID before re-registering (avoids spurious unavailable-id).
+  const delay = (reuseCode && oldPeer) ? 800 : 0;
+  setTimeout(() => actuallyCreatePeer(code, pid, retry, reuseCode), delay);
+}
+
+function actuallyCreatePeer(code, pid, retry, reuseCode) {
   net.peer = new Peer(pid, { debug: 1 });
 
   net.peer.on("open", (id) => {
     net.myId = id;
     net.roomCode = code;
-    net.players = [{ id, name: net.myName, isHost: true }];
+    // Only reset players if this is a fresh room, not a reconnection
+    if (!reuseCode) {
+      net.players = [{ id, name: net.myName, isHost: true }];
+    } else {
+      // Update our own player id (it might have changed) and clear stale guests
+      net.players = [{ id, name: net.myName, isHost: true }];
+      updateLobbyStatus("Reconnected — waiting for players…");
+    }
+    saveState();
     goLobby();
   });
 
@@ -188,13 +231,28 @@ function attemptCreatePeer(retry = 0) {
 
   net.peer.on("error", (err) => {
     console.warn("peer error", err);
-    if (err.type === "unavailable-id" && retry < 5) {
-      attemptCreatePeer(retry + 1);
+    if (err.type === "unavailable-id") {
+      if (reuseCode && retry < 6) {
+        // Server still holds the old ID from before backgrounding — wait and retry
+        updateLobbyStatus("Reconnecting… (" + (retry + 1) + "/6)");
+        setTimeout(() => attemptCreatePeer(retry + 1, reuseCode), 2000);
+      } else if (!reuseCode && retry < 5) {
+        attemptCreatePeer(retry + 1);
+      } else if (reuseCode) {
+        // Give up on old code, tell user
+        alert("Your room expired. Create a new one.");
+        clearRoomState();
+        showScreen("home");
+      } else {
+        alert("Couldn't create room. Try again.");
+      }
     } else if (err.type === "network" || err.type === "server-error" || err.type === "socket-error") {
-      // Transient — try to reconnect
       try { net.peer.reconnect(); } catch (e) {}
+    } else if (err.type === "disconnected") {
+      // Peer was torn down — recreate
+      if (net.roomCode) attemptCreatePeer(0, net.roomCode);
     } else {
-      alert("Couldn't create room: " + err.type + ". Try again.");
+      console.warn("Non-fatal peer error:", err.type);
     }
   });
 
@@ -304,6 +362,7 @@ document.getElementById("join-room-btn").addEventListener("click", () => {
       opened = true;
       send(conn, { t: "join", name });
       showErr("join-error", "");
+      saveState();
       goLobby();
     });
     conn.on("data", (msg) => handleGuestMessage(msg));
@@ -345,13 +404,30 @@ document.getElementById("join-room-btn").addEventListener("click", () => {
 
 // When the user comes back from the app switcher / another tab, force a reconnect
 // if PeerJS quietly lost its signaling connection while backgrounded.
+// When the tab is refocused after backgrounding (esp. on mobile), the PeerJS
+// connection to the signaling server is usually dead. Two failure modes:
+//   1. peer.disconnected (soft) — just call reconnect()
+//   2. peer.destroyed  (hard)   — must fully recreate the peer with same code
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
-  if (!net.peer) return;
-  if (net.peer.disconnected && !net.peer.destroyed) {
-    try { net.peer.reconnect(); } catch (e) {}
+  if (!net.peer || !net.roomCode) return;
+
+  const p = net.peer;
+  if (p.destroyed) {
+    // Full recreate needed
     updateLobbyStatus("Reconnecting…");
-    // Optimistically restore the normal status after reconnect completes
+    if (net.role === "host") {
+      attemptCreatePeer(0, net.roomCode);
+    } else {
+      rejoinAsGuest(net.roomCode, net.myName);
+    }
+  } else if (p.disconnected) {
+    updateLobbyStatus("Reconnecting…");
+    try { p.reconnect(); } catch (e) {
+      // Reconnect failed — hard recreate
+      if (net.role === "host") attemptCreatePeer(0, net.roomCode);
+      else rejoinAsGuest(net.roomCode, net.myName);
+    }
     setTimeout(() => {
       if (net.peer && !net.peer.disconnected && net.phase === "lobby") {
         updateLobbyStatus(net.role === "host" ? "Waiting for players…" : "Connected");
@@ -359,6 +435,26 @@ document.addEventListener("visibilitychange", () => {
     }, 2500);
   }
 });
+
+// Guest reconnect helper — same code, same name
+function rejoinAsGuest(code, name) {
+  if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
+  net.peer = new Peer({ debug: 1 });
+  net.peer.on("open", (id) => {
+    net.myId = id;
+    const conn = net.peer.connect(peerIdFor(code), { reliable: true });
+    net.hostConn = conn;
+    conn.on("open", () => {
+      send(conn, { t: "join", name });
+      updateLobbyStatus("Reconnected");
+    });
+    conn.on("data", (msg) => handleGuestMessage(msg));
+    conn.on("close", () => { updateLobbyStatus("Host disconnected"); });
+  });
+  net.peer.on("disconnected", () => {
+    try { net.peer.reconnect(); } catch (e) {}
+  });
+}
 
 function handleGuestMessage(msg) {
   if (!msg || !msg.t) return;
@@ -475,6 +571,7 @@ function leaveRoom() {
   net.myRole = null;
   net.votes = {};
   net.phase = "lobby";
+  clearRoomState();
   showScreen("home");
 }
 
@@ -911,4 +1008,52 @@ function escapeHtml(s) {
 // Auto-uppercase code input
 document.getElementById("guest-code").addEventListener("input", (e) => {
   e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
+});
+
+// ============================================================
+// LOAD SAVED STATE ON PAGE LOAD
+// ============================================================
+(function restoreOnLoad() {
+  const s = loadState();
+  if (!s) return;
+  // Prefill name inputs so users don't retype after a refresh
+  if (s.name) {
+    const hostInput = document.getElementById("host-name");
+    const guestInput = document.getElementById("guest-name");
+    if (hostInput && !hostInput.value) hostInput.value = s.name;
+    if (guestInput && !guestInput.value) guestInput.value = s.name;
+    net.myName = s.name;
+  }
+  // Offer to rejoin the last room (only if they were mid-lobby)
+  if (s.roomCode && s.role === "guest" && s.name) {
+    // Prefill code + name so a single tap rejoins
+    const codeInput = document.getElementById("guest-code");
+    if (codeInput) codeInput.value = s.roomCode;
+    // Auto-navigate to join screen
+    setTimeout(() => {
+      if (confirm(`Rejoin room ${s.roomCode}?`)) {
+        showScreen("online-join");
+        document.getElementById("join-room-btn").click();
+      }
+    }, 200);
+  } else if (s.roomCode && s.role === "host" && s.name) {
+    // Host rejoin: reopen with the SAME room code (guests' connections were lost
+    // but they can rejoin by entering the same code).
+    setTimeout(() => {
+      if (confirm(`Reopen your room ${s.roomCode}? (Other players will need to rejoin.)`)) {
+        net.myName = s.name;
+        net.role = "host";
+        attemptCreatePeer(0, s.roomCode);
+      }
+    }, 200);
+  }
+})();
+
+// Persist name whenever the user types it
+["host-name", "guest-name"].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("input", () => {
+    net.myName = el.value.trim();
+    saveState();
+  });
 });
