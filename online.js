@@ -531,21 +531,22 @@ function renderLobbyPlayers() {
   if (net.role === "host") updateLobbyImpUI();
 }
 
-// One button: native share sheet on mobile, clipboard fallback on desktop
-document.getElementById("share-code-btn").addEventListener("click", async (e) => {
+// Just copy the code to clipboard — no share dialog
+document.getElementById("share-code-btn").addEventListener("click", (e) => {
   e.stopPropagation();
   if (!net.roomCode) return;
-  const shareText = `Join my Impostor game! Room code: ${net.roomCode}\n${location.href}`;
-  if (navigator.share) {
-    try {
-      await navigator.share({ title: "Impostor Game", text: shareText });
-      return;
-    } catch (err) { /* user cancelled — fall through to copy */ }
-  }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(shareText).catch(() => {});
+    navigator.clipboard.writeText(net.roomCode).catch(() => {});
+  } else {
+    // Fallback for older browsers
+    const ta = document.createElement("textarea");
+    ta.value = net.roomCode;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (err) {}
+    document.body.removeChild(ta);
   }
-  flashStatus("Copied to clipboard!");
+  flashStatus("Copied!");
 });
 
 function flashStatus(text) {

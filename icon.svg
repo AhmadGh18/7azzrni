@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Solid background so this works as a maskable icon too -->
+  <rect width="512" height="512" fill="#1a1d2e"/>
+
+  <!-- Soft glow ring -->
+  <circle cx="256" cy="256" r="160" fill="none" stroke="#7c8cf5" stroke-width="6" opacity="0.25"/>
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#7c8cf5" stroke-width="12" opacity="0.5"/>
+
+  <!-- Big question mark -->
+  <text x="256" y="358"
+        font-size="300"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-weight="900"
+        text-anchor="middle"
+        fill="#7c8cf5">?</text>
+
+  <!-- Small "eye" accent to hint at the spy theme -->
+  <circle cx="368" cy="150" r="14" fill="#f0b678"/>
+  <circle cx="368" cy="150" r="6" fill="#1a1d2e"/>
+</svg>

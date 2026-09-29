@@ -1,0 +1,20 @@
+{
+  "name": "Who's the Impostor?",
+  "short_name": "Impostor",
+  "description": "Party game — find the impostor among your friends.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1a1d2e",
+  "theme_color": "#1a1d2e",
+  "categories": ["games", "entertainment", "social"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
