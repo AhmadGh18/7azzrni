@@ -219,16 +219,21 @@ function renderReveal() {
   if (isImpostor) {
     roleEl.textContent = "You are the";
     wordEl.textContent = "IMPOSTOR 🤫";
-    if (state.difficulty === "medium") {
-      hintEl.textContent = `Hint: ${state.wordEntry.hint}`;
-    } else {
-      hintEl.textContent = "";
-    }
+    const parts = [];
+    if (state.difficulty === "medium") parts.push(`Hint: ${state.wordEntry.hint}`);
+    // Multi-impostor: tell them who their teammate(s) are
+    const teammates = state.impostorIndices
+      .filter(i => i !== idx)
+      .map(i => state.players[i].name);
+    if (teammates.length) parts.push(`Your teammate${teammates.length > 1 ? "s" : ""}: ${teammates.join(", ")}`);
+    hintEl.innerHTML = parts.map(p => `<div>${p}</div>`).join("");
   } else {
     roleEl.textContent = "Your word is";
     wordEl.textContent = state.wordEntry.word;
     hintEl.textContent = "";
   }
+  // Same neutral sound for both roles — so nearby players can't tell who's the impostor
+  if (typeof sfx !== "undefined") sfx.reveal();
 }
 
 document.getElementById("reveal-next").addEventListener("click", () => {
@@ -321,6 +326,7 @@ function renderVote() {
     btn.innerHTML = `<span class="vote-emoji">${emojiForIndex(i)}</span>${p.name}`;
     btn.addEventListener("click", () => {
       state.votedIndex = i;
+      if (typeof sfx !== "undefined") sfx.vote();
       showResult();
     });
     grid.appendChild(btn);
@@ -355,11 +361,13 @@ function showResult() {
     title.textContent = "Caught!";
     sub.textContent = `You caught ${state.players[state.votedIndex].name}! Nice work.`;
     launchConfetti();
+    if (typeof sfx !== "undefined") sfx.win();
   } else {
     emoji.textContent = "🤫";
     title.textContent = "The Impostor Wins!";
     const votedName = state.players[state.votedIndex].name;
     sub.textContent = `${votedName} was innocent. The real impostor got away!`;
+    if (typeof sfx !== "undefined") sfx.lose();
   }
 
   document.getElementById("result-word").textContent = state.wordEntry.word;

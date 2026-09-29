@@ -310,6 +310,7 @@ function handleHostMessage(conn, msg) {
       broadcastRoster();
       renderLobbyPlayers();
       addSystemMessage(name + " joined");
+      if (typeof sfx !== "undefined") sfx.join();
       break;
     }
     case "chat": {
@@ -468,7 +469,7 @@ function handleGuestMessage(msg) {
       // informational — hide lobby ui, wait for role
       break;
     case "role":
-      net.myRole = { isImpostor: msg.isImpostor, word: msg.word, hint: msg.hint };
+      net.myRole = { isImpostor: msg.isImpostor, word: msg.word, hint: msg.hint, teammates: msg.teammates };
       resetRoundLocalState();
       showOnlineReveal();
       break;
@@ -479,7 +480,10 @@ function handleGuestMessage(msg) {
       handlePhaseChange(msg);
       break;
     case "chat":
-      if (msg.fromId !== net.myId) addChatMessage(msg);
+      if (msg.fromId !== net.myId) {
+        addChatMessage(msg);
+        if (typeof sfx !== "undefined") sfx.message();
+      }
       break;
     case "votes":
       updateVoteTally(msg);
@@ -622,11 +626,20 @@ function hostStartGame() {
   net.players.forEach(p => {
     const isImp = net.impostorIds.includes(p.id);
     const role = { t: "role", isImpostor: isImp };
-    if (!isImp) role.word = net.roundWord.word;
-    else if (net.difficulty === "medium") role.hint = net.roundWord.hint;
+    if (!isImp) {
+      role.word = net.roundWord.word;
+    } else {
+      if (net.difficulty === "medium") role.hint = net.roundWord.hint;
+      // Multi-impostor: tell each impostor who their teammate(s) are
+      const teammates = net.impostorIds
+        .filter(id => id !== p.id)
+        .map(id => (net.players.find(pp => pp.id === id) || {}).name)
+        .filter(Boolean);
+      if (teammates.length) role.teammates = teammates;
+    }
 
     if (p.id === net.myId) {
-      net.myRole = { isImpostor: role.isImpostor, word: role.word, hint: role.hint };
+      net.myRole = { isImpostor: role.isImpostor, word: role.word, hint: role.hint, teammates: role.teammates };
       showOnlineReveal();
     } else {
       const conn = net.guestConns[p.id];
@@ -662,12 +675,20 @@ function showOnlineReveal() {
   if (net.myRole.isImpostor) {
     role.textContent = "You are the";
     word.textContent = "IMPOSTOR 🤫";
-    hint.textContent = net.myRole.hint ? `Hint: ${net.myRole.hint}` : "";
+    const parts = [];
+    if (net.myRole.hint) parts.push(`Hint: ${escapeHtml(net.myRole.hint)}`);
+    if (net.myRole.teammates && net.myRole.teammates.length) {
+      const label = net.myRole.teammates.length > 1 ? "teammates" : "teammate";
+      parts.push(`Your ${label}: <strong>${net.myRole.teammates.map(escapeHtml).join(", ")}</strong>`);
+    }
+    hint.innerHTML = parts.map(p => `<div>${p}</div>`).join("");
   } else {
     role.textContent = "Your word is";
     word.textContent = net.myRole.word || "—";
     hint.textContent = "";
   }
+  // Same neutral sound for both roles — no audio giveaway if players sit near each other
+  if (typeof sfx !== "undefined") sfx.reveal();
 }
 
 document.getElementById("online-reveal-continue").addEventListener("click", () => {
@@ -717,11 +738,16 @@ function startChatTimer(seconds, isExtension) {
   net.timerInterval = setInterval(() => {
     net.timerLeft--;
     updateChatTimer();
+    // Countdown beeps for the last 5 seconds
+    if (typeof sfx !== "undefined" && net.timerLeft > 0 && net.timerLeft <= 5) {
+      sfx.urgent();
+    }
     if (net.timerLeft <= 0) {
       clearInterval(net.timerInterval);
       net.timerInterval = null;
       // Only surface the decision UI if the player is currently on the chat screen
       if (document.getElementById("screen-online-chat").classList.contains("active")) {
+        if (typeof sfx !== "undefined") sfx.impostor();
         showDecisionBar();
       }
     }
@@ -850,6 +876,7 @@ function openVoteScreen() {
 }
 
 function castVote(votedId) {
+  if (typeof sfx !== "undefined") sfx.vote();
   document.querySelectorAll(".vote-card").forEach(el => {
     el.disabled = true;
     el.classList.toggle("voted-by-me", el.getAttribute("data-vote-id") === votedId);
@@ -939,16 +966,20 @@ function showOnlineResult(msg) {
     ? (net.players.find(p => p.id === msg.votedOutId) || {}).name
     : null;
 
+  const iAmImpostor = msg.impostorIds.includes(net.myId);
   if (msg.winner === "players") {
-    emoji.textContent = "🎉";
-    title.textContent = "You Win!";
+    emoji.textContent = iAmImpostor ? "😔" : "🎉";
+    title.textContent = iAmImpostor ? "You Lose!" : "You Win!";
     sub.textContent = `You caught ${impostorNames.join(", ")}!`;
-    launchConfettiIn("online-confetti");
+    if (!iAmImpostor) launchConfettiIn("online-confetti");
+    if (typeof sfx !== "undefined") (iAmImpostor ? sfx.lose() : sfx.win());
   } else {
-    emoji.textContent = "🤫";
-    title.textContent = "Impostor Wins!";
+    emoji.textContent = iAmImpostor ? "🎉" : "🤫";
+    title.textContent = iAmImpostor ? "You Win!" : "Impostor Wins!";
     if (votedOutName) sub.textContent = `${votedOutName} was innocent. The impostor was ${impostorNames.join(", ")}.`;
     else sub.textContent = `No one was voted out. The impostor was ${impostorNames.join(", ")}.`;
+    if (iAmImpostor) launchConfettiIn("online-confetti");
+    if (typeof sfx !== "undefined") (iAmImpostor ? sfx.win() : sfx.lose());
   }
   wordEl.textContent = msg.word;
 

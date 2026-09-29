@@ -1,5 +1,5 @@
 // Bump the version any time you deploy new files so users get the update.
-const CACHE = "impostor-v1";
+const CACHE = "impostor-v2";
 
 const FILES = [
   "./",
@@ -8,6 +8,7 @@ const FILES = [
   "./script.js",
   "./words.js",
   "./online.js",
+  "./sounds.js",
   "./manifest.json",
   "./icon.svg"
 ];

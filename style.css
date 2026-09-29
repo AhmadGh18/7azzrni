@@ -692,6 +692,36 @@ input { font-family: inherit; }
   .subtitle { margin-bottom: 24px; }
 }
 
+/* ====== SOUND TOGGLE ====== */
+.sound-toggle {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 1000;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, background 0.2s ease;
+}
+.sound-toggle:hover { background: rgba(255, 255, 255, 0.14); }
+.sound-toggle:active { transform: scale(0.9); }
+@media (min-width: 521px) {
+  .sound-toggle {
+    top: 20px;
+    right: calc(50% - 260px + 14px);
+  }
+}
+
 /* ====== ONLINE SCREENS ====== */
 .online-hero {
   font-size: 84px;
